@@ -45,6 +45,9 @@ def get_raster_points(voxel_resolution):
         np.linspace(-0.5, 0.5, voxel_resolution),
         np.linspace(-0.5, 0.5, voxel_resolution),
         np.linspace(-0.5, 0.5, voxel_resolution)
+        # np.linspace(-0.55, 0.55, voxel_resolution),
+        # np.linspace(-0.55, 0.55, voxel_resolution),
+        # np.linspace(-0.55, 0.55, voxel_resolution)
     )
     points = np.stack(points)
     points = np.swapaxes(points, 1, 2)
@@ -75,7 +78,7 @@ def get_occ(obj_mesh, VOXEL_RES, offset=None, scaling=None, sample_points=None):
         vertices = obj_mesh.vertices - obj_mesh.bounding_box.centroid
     else:
         vertices = obj_mesh.vertices - offset
-    
+
     if scaling is None:
         vertices *= 1 / np.max(obj_mesh.bounding_box.extents)
     else:

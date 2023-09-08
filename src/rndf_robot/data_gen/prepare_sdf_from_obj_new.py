@@ -11,6 +11,7 @@ from tqdm import tqdm
 import numpy as np
 import trimesh
 from mesh_to_sdf import get_surface_point_cloud, scale_to_unit_cube, BadMeshException
+from pyscf import batch_compute_scfs
 
 from rndf_robot.utils import util, path_util
 
@@ -52,6 +53,11 @@ CREATE_UNIFORM_AND_SURFACE = False # Uniformly sampled points for the Pointnet-b
 SDF_POINT_CLOUD_SIZE = 200000 # For DeepSDF point clouds (CREATE_SDF_CLOUDS)
 POINT_CLOUD_SAMPLE_SIZE = 64**3 # For uniform and surface points (CREATE_UNIFORM_AND_SURFACE)
 
+side_length = 128
+block = 128
+bs = 1 / block
+hbs = bs * 0.5
+
 # Options for virtual scans used to generate SDFs
 USE_DEPTH_BUFFER = True
 SCAN_COUNT = 50
@@ -60,7 +66,7 @@ SCAN_RESOLUTION = 1024
 def get_model_files():
     for directory, t, files in os.walk(DIRECTORY_MODELS):
         for filename in files:
-            if filename.endswith(MODEL_EXTENSION):
+            if filename.endswith(MODEL_EXTENSION) and "dec" not in filename:
                 yield os.path.join(directory, filename)
 
 def get_hash(filename):
@@ -117,13 +123,13 @@ def get_uniform_and_surface_points(surface_point_cloud, number_of_points = 20000
 
     return uniform_points, uniform_sdf, near_surface_points, near_surface_sdf
 
-def process_model_file(filename, data_dict):
+def process_model_file(filename):
     try:
         if is_bad_mesh(filename):
             print('Skipping bad mesh (is_bad_mesh): {:s}'.format(get_hash_non_shapenet(filename)))
             return
 
-        obj_id = filename.split('/')[-3]
+        # obj_id = filename.split('/')[-3]
         # idx = f'03797390/{obj_id}/models/model_normalized_128.mat'
         # points, _, _ = data_dict[idx]
         mesh = trimesh.load(filename)
@@ -143,6 +149,7 @@ def process_model_file(filename, data_dict):
                 mark_bad_mesh(filename)
                 return
             del mesh_unit_cube, surface_point_cloud
+        
 
         create_uniform_and_surface = CREATE_UNIFORM_AND_SURFACE and (not os.path.exists(get_uniform_filename(filename)) or not os.path.exists(get_surface_filename(filename)))
         create_sdf_clouds = CREATE_SDF_CLOUDS and not os.path.exists(get_sdf_cloud_filename(filename, shapenet=IS_SHAPENET))
@@ -171,11 +178,20 @@ def process_model_file(filename, data_dict):
                     np.save(get_surface_filename(filename), combined_surface)
 
                 if create_sdf_clouds:
-                    sdf_points, sdf_values = surface_point_cloud.sample_sdf_near_surface(use_scans=True, sign_method='depth' if USE_DEPTH_BUFFER else 'normal', number_of_points=SDF_POINT_CLOUD_SIZE, min_size=0.015)
+                    # sdf
+                    # sdf_points, sdf_values = surface_point_cloud.sample_sdf_near_surface(use_scans=True, sign_method='depth' if USE_DEPTH_BUFFER else 'normal', number_of_points=SDF_POINT_CLOUD_SIZE, min_size=0.005)
+                    sdf_points, sdf_values = surface_point_cloud.sample_sdf_near_surface(use_scans=True, sign_method='depth' if USE_DEPTH_BUFFER else 'normal', number_of_points=SDF_POINT_CLOUD_SIZE)
                     # combined = np.concatenate((sdf_points, sdf_values[:, np.newaxis]), axis=1)
-                    sdf_values = surface_point_cloud.get_sdf_in_batches(points, use_depth_buffer=True,
-                                                                        return_gradients=False)
-                    combined = np.concatenate((points, sdf_values[:, np.newaxis]), axis=1)
+                    # sdf_values = surface_point_cloud.get_sdf_in_batches(points, use_depth_buffer=True,
+                    #                                                     return_gradients=False)
+
+                    # scf
+                    scf_values = batch_compute_scfs(mesh_unit_sphere, sdf_points)[..., :5]
+
+                    # occ
+                    occ = sdf_values <= 0
+
+                    combined = np.concatenate((sdf_points, occ[:, np.newaxis], sdf_values[:, np.newaxis], scf_values), axis=1)
                     sdf_cloud_fname = get_sdf_cloud_filename(filename, shapenet=IS_SHAPENET).replace('.npy', '.npz')
                     print(f'Saving SDF cloud to file: {sdf_cloud_fname}')
                     np.savez(sdf_cloud_fname, coords_sdf=combined, norm_factor=norm_factor)
@@ -207,20 +223,19 @@ def process_model_files():
     print(f"Model files (total: {len(files)})")
     print('\n'.join(files))
 
-    points_dir = '/home/ikun/master-thesis/ndf_robot/src/ndf_robot/data/training_data'
-    data_dict = pickle.load(open(f'{points_dir}/occ_shapenet_mug.p', 'rb'))
-
     # worker_count = os.cpu_count() // 4
     worker_count = 1
     print("Using {:d} processes.".format(worker_count))
     pool = Pool(worker_count)
+
+    # files_new = [files[1], files[0]]
 
     progress = tqdm(total=len(files))
     def on_complete(*_):
         progress.update()
 
     for filename in files:
-        pool.apply_async(process_model_file, args=(filename, data_dict), callback=on_complete)
+        pool.apply_async(process_model_file, args=(filename, ), callback=on_complete)
     pool.close()
     pool.join()
 

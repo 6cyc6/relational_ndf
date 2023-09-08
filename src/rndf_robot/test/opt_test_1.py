@@ -16,7 +16,7 @@ sys.path.append(os.path.join(BASE_DIR))
 
 
 opt_iterations = 500
-n_pts = 2000
+n_pts = 1500
 
 # pcd_dir = get_demo_place_dir(obj="y_cups", file_name="0/0.npz")
 pcd_dir = os.path.join(BASE_DIR, 'test_data', "y_cups", "t1/0.npz")

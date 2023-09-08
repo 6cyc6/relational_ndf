@@ -2,7 +2,11 @@ import numpy as np
 import torch
 
 from torch.nn import functional as F
-import util
+
+from rndf_robot.utils import util
+
+
+# import util
 
 
 def compute_normal_map(x_img, y_img, z, intrinsics):
