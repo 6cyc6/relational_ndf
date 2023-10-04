@@ -211,8 +211,9 @@ def worker_gen(child_conn, global_dict, worker_flag_dict, seed, worker_id):
            
                 obj_poses.append(obj_pose_camera_np)
                 depth_imgs.append(seg_depth)
+                # seg_idxs.append(np.array(obj_inds, dtype=object))
                 seg_idxs.append(obj_inds)
-            
+
             pix_3d = np.concatenate(obj_pcd_pts, axis=0)
             table_pix_3d = np.concatenate(table_pcd_pts, axis=0)
 
@@ -238,7 +239,7 @@ def worker_gen(child_conn, global_dict, worker_flag_dict, seed, worker_id):
                     global_dict['local_trial_start'] = 0
                 local_trial += 1
 
-                save_path = osp.join(save_dir, '{}_{}_{}.npz'.format(worker_id, local_trial, num_samples))
+                save_path = osp.join(save_dir, '{}_{}_{}.npz'.format(worker_id, local_trial, num_samples + 3000 * 19))
 
                 obj_name = obj_file_to_load.split(path_util.get_rndf_obj_descriptions())[1][1:]
                 np.savez(
@@ -264,7 +265,8 @@ def worker_gen(child_conn, global_dict, worker_flag_dict, seed, worker_id):
 
             worker_flag_dict[worker_id] = True
             mem_usage_gb = proc.memory_info().rss / (1024.0**3)
-            if mem_usage_gb > 1.8:
+            # if mem_usage_gb > 1.8:
+            if mem_usage_gb > 3.5:
                 logging.critical(f"\n\n\nMemory consumption too large, breaking at object {global_dict['object_loop_index']}, total samples {num_samples}, worker id {worker_id}\n\n\n")
                 break
             child_conn.send('DONE')

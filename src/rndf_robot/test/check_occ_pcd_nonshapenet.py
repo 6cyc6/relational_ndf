@@ -16,7 +16,6 @@ import polyscope as ps
 
 from rndf_robot.utils import util, path_util
 from rndf_robot.utils.geometry import lift
-from rndf_robot.utils.mesh_util import inside_mesh
 from rndf_robot.utils.mesh_util.three_util import get_raster_points, get_occ
 
 index = 0
@@ -38,20 +37,9 @@ mesh_dir = f'{ndf_root}/src/ndf_robot/descriptions/objects'
 save_dir = f'{ndf_root}/src/ndf_robot/data/training_data/scfs'
 pts_dir = f'{ndf_root}/src/ndf_robot/data/training_data'
 
-mug_path = ndf_training_dir
-paths = [ndf_training_dir]
-files_total = []
-for path in paths:
-    files = list(sorted(glob.glob(path+"/*.npz")))
-    n = len(files)
-    idx = int(0.9 * n)
 
-    files_total.extend(files)
-
-shapenet_mug_dict = pickle.load(open(osp.join(pts_dir, 'occ_shapenet_mug.p'), 'rb'))
-
-data = np.load(files_total[index], allow_pickle=True)
-# data = np.load("/home/ikun/master-thesis/relational_ndf/src/rndf_robot/data/training_data/test_hammer/1_3_1.npz", allow_pickle=True)
+# data = np.load(files_total[index], allow_pickle=True)
+data = np.load("/home/ikun/master-thesis/relational_ndf/src/rndf_robot/data/training_data/test_hammer/1_3_1.npz", allow_pickle=True)
 posecam = data['object_pose_cam_frame']  # legacy naming, used to use pose expressed in camera frame. global reference frame doesn't matter though
 
 idxs = list(range(posecam.shape[0]))
@@ -67,9 +55,15 @@ for i in idxs:
     poses.append(pos)
     quats.append(quat)
 
-shapenet_id = str(data['shapenet_id'].item())
-category_id = str(data['shapenet_category_id'].item())
-# obj_name = str(data["obj_file"].item())
+# shapenet_id = str(data['shapenet_id'].item())
+# category_id = str(data['shapenet_category_id'].item())
+obj_name = str(data["obj_file"].item())
+obj_id = obj_name.split('/')[-1].split('.')[0]
+obj_path = osp.join("/home/ikun/master-thesis/relational_ndf/src/rndf_robot/descriptions/objects", obj_name)
+label_path = osp.join("/home/ikun/master-thesis/relational_ndf/src/rndf_robot/descriptions/objects/sdf/hammer/cloud", obj_id + ".npz")
+label = np.load(label_path, allow_pickle=True)
+occ_sdf_scf = label["coords_sdf"]
+norm_factor = label["norm_factor"]
 
 depths = []
 segs = []
@@ -116,8 +110,10 @@ for i in range(len(segs)):
     dp_np = torch.cat([dp_np, torch.ones_like(dp_np[..., :1])], dim=-1)
     dp_nps.append(dp_np)
 
-voxel_path = osp.join(category_id, shapenet_id, 'models', 'model_normalized_128.mat')
-coord, voxel_bool, _ = shapenet_mug_dict[voxel_path]
+# voxel_path = osp.join(category_id, shapenet_id, 'models', 'model_normalized_128.mat')
+# coord, voxel_bool, _ = shapenet_mug_dict[voxel_path]
+coord = occ_sdf_scf[:, 0:3]
+voxel_bool = occ_sdf_scf[:, 3]
 
 rix = np.random.permutation(coord.shape[0])
 
@@ -129,6 +125,7 @@ coord_ = coord
 
 offset = np.random.uniform(-hbs, hbs, coord.shape)
 coord = coord + offset
+coord = coord * norm_factor
 coord = coord * data['mesh_scale']
 
 coord = torch.from_numpy(coord)
@@ -169,56 +166,13 @@ occ_ = label_occ
 coord_np = coord.cpu().numpy()
 occ_pts_ = coord_np[np.where(occ_)[0]]
 non_occ_pts_ = coord_np[np.where(np.logical_not(occ_))[0]]
-occ_pts = coord_[np.where(occ_)[0]]
-print(1)
-
-obj_fname = f'{mesh_dir}/{category}_centered_obj/{shapenet_id}/models/model_128_df.obj'
-obj_mesh = trimesh.load(obj_fname, process=False)
-obj_pcd = obj_mesh.sample(5000)
-
-sample_points = get_raster_points(voxel_res)
-occ = inside_mesh.check_mesh_contains(obj_mesh, sample_points)
-occ = sample_points[np.where(occ)[0]]
-
-# vertices = obj_mesh.vertices - obj_mesh.bounding_box.centroid
-# norm_factor = 1 / np.max(obj_mesh.bounding_box.extents)
-# vertices *= norm_factor
-# obj_mesh = trimesh.Trimesh(vertices=vertices, faces=obj_mesh.faces)
-# obj_pcd_2 = obj_mesh.sample(5000)
-
-vertices = obj_mesh.vertices - obj_mesh.bounding_box.centroid
-distances = np.linalg.norm(vertices, axis=1)
-vertices /= np.max(distances)
-
-# mesh_unit_sphere = trimesh.Trimesh(vertices=vertices, faces=obj_mesh.faces)
-# norm_factor = np.max(distances)
-# obj_pcd_2 = mesh_unit_sphere.sample(5000)
-
-surface_point_cloud = get_surface_point_cloud(obj_mesh, bounding_radius=1, scan_count=SCAN_COUNT, scan_resolution=SCAN_RESOLUTION)
-
-# sample_points = get_raster_points(voxel_res)
-# occ = inside_mesh.check_mesh_contains(obj_mesh, sample_points)
-
-# check_pts, occ, scf = get_occ(obj_mesh, voxel_res)
-# sdf_values = surface_point_cloud.get_sdf_in_batches(sample_points, use_depth_buffer=True, return_gradients=False)
-
-# sdf_points, sdf_values = surface_point_cloud.sample_sdf_near_surface(use_scans=True, sign_method='depth', number_of_points=200000, min_size=0.015)
-sdf_points, sdf_values = surface_point_cloud.sample_sdf_near_surface(use_scans=True, sign_method='depth', number_of_points=200000)
-occ_in = sdf_points[np.where(np.abs(sdf_values) < 0.002)[0]]
-
-# occ = sample_points[np.where(occ)[0]]
-# non_occ_pts = check_pts[np.where(np.logical_not(occ))[0]]
-
+occ_pts = coord_np[np.where(occ_)[0]]
 
 ps.init()
 ps.set_up_dir("z_up")
-# ps.register_point_cloud("obj", occ_pts_, radius=0.005, color=[0, 0, 1], enabled=True)
-# ps.register_point_cloud("obj_non", non_occ_pts_, radius=0.005, color=[1, 0, 0], enabled=True)
-# ps.register_point_cloud("pcd", point_cloud_np, radius=0.005, color=[0, 1, 0], enabled=True)
-ps.register_point_cloud("obj_", occ_pts, radius=0.005, color=[1, 0, 0], enabled=True)
-ps.register_point_cloud("obj_origin", obj_pcd, radius=0.005, color=[0, 1, 0], enabled=True)
-ps.register_point_cloud("occ", occ, radius=0.005, color=[0, 0, 1], enabled=True)
-ps.register_point_cloud("occ_in", occ_in, radius=0.005, color=[1, 0, 1], enabled=True)
+
+ps.register_point_cloud("pcd", point_cloud_np, radius=0.005, color=[1, 0, 0], enabled=True)
+ps.register_point_cloud("occ", occ_pts, radius=0.005, color=[0, 0, 1], enabled=True)
 
 ps.show()
 

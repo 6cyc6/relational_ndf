@@ -1,7 +1,3 @@
-# # Run the algorithm
-# ./build/manifold --input /home/ikun/obj/hammer/1/model_origin.obj --output /home/ikun/obj/hammer/1/model.obj
-# ./build/manifold --input /home/ikun/obj/hammer/2/model_origin.obj --output /home/ikun/obj/hammer/2/model.obj
-#
 import glob
 import os.path as osp
 import os
@@ -13,6 +9,7 @@ import torch
 import open3d as o3d
 import trimesh
 import numpy as np
+from numpy.core.multiarray import unpackbits
 from mesh_to_sdf import get_surface_point_cloud
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
@@ -21,7 +18,6 @@ import polyscope as ps
 
 from rndf_robot.utils import util, path_util
 from rndf_robot.utils.geometry import lift
-from rndf_robot.utils.mesh_util import inside_mesh
 from rndf_robot.utils.mesh_util.three_util import get_raster_points, get_occ
 
 SCAN_COUNT = 50
@@ -33,64 +29,27 @@ block = 128
 bs = 1 / block
 hbs = bs * 0.5
 
-pcd_name = "/home/ikun/master-thesis/relational_ndf/src/rndf_robot/data/training_data/bottle_table_all_pose_4_cam_half_occ_full_rand_scale/0_2_30244.npz"
+mesh_dir = "/home/ikun/master-thesis/relational_ndf/src/rndf_robot/descriptions/objects"
+pcd_name = "/home/ikun/master-thesis/relational_ndf/src/rndf_robot/data/training_data/syn_container_pcd_smaller/0_10_498.npz"
 data = np.load(pcd_name, allow_pickle=True)
-shapenet_id = data["shapenet_id"]
-print(shapenet_id)
 mesh_scale = data['mesh_scale']
+obj_file = str(data["obj_file"])
 posecam = data['object_pose_cam_frame']  # legacy naming, used to use pose expressed in camera frame. global reference frame doesn't matter though
 
-ndf_root = os.environ['NDF_SOURCE_DIR']
-pts_dir = f'{ndf_root}/src/ndf_robot/data/training_data'
-shapenet_mug_dict = pickle.load(open(osp.join(pts_dir, 'occ_shapenet_bottle.p'), 'rb'))
-voxel_path = f'02876657/{shapenet_id}/models/model_normalized_128.mat'
-coord, voxel_bool, _ = shapenet_mug_dict[voxel_path]
+mesh_path = osp.join(mesh_dir, obj_file)
+mesh = trimesh.load_mesh(mesh_path)
+pcd_mesh = mesh.sample(2000)
 
-occ_pts_label = coord[np.where(voxel_bool)[0]]
-occ_not_pts = coord[np.where(np.logical_not(voxel_bool))[0]]
+label_path = "/home/ikun/master-thesis/occupancy_networks/scripts/data/build/container/4_points/syn_container_0.obj.npz"
+data_label = np.load(label_path, allow_pickle=True)
+pts = data_label["points"]
+occ = data_label["occupancies"]
+norm_factor = data_label["scale"]
+occ = unpackbits(occ)
 
-sdf_path = f"/home/ikun/master-thesis/relational_ndf/src/rndf_robot/descriptions/objects/sdf/bottle_centered_obj_normalized_sdf/cloud/{shapenet_id}.npz"
-data = np.load(sdf_path, allow_pickle=True)
-coords = data["coords_sdf"]
-norm_factor_data = data["norm_factor"]
-
-occ_in = coords[:, :3][np.where(np.abs(coords[:, -1]) < hbs)[0]]
-
-# # obj_fname = "/home/ikun/master-thesis/ndf_robot/src/ndf_robot/descriptions/objects/bottle_centered_obj/1b64b36bf7ddae3d7ad11050da24bb12/models/model_128_df.obj"
-# obj_fname = f"/home/ikun/master-thesis/ndf_robot/src/ndf_robot/descriptions/objects/bottle_centered_obj_normalized/{shapenet_id}/models/model_normalized.obj"
-# obj_fname_ = f"/home/ikun/master-thesis/ndf_robot/src/ndf_robot/descriptions/objects/bottle_centered_obj/{shapenet_id}/models/model_128_df.obj"
-#
-# obj_mesh = trimesh.load(obj_fname, process=False)
-# obj_mesh_ = trimesh.load(obj_fname_, process=False)
-# # pcd_obj = obj_mesh.sample(5000)
-# # pcd_mean = np.mean(pcd_obj, axis=0)
-# # pcd_obj = pcd_obj - pcd_mean
-# # scene = trimesh.Scene()
-# # scene.add_geometry([obj_mesh, obj_mesh_])
-# # scene.show()
-#
-# vertices = obj_mesh.vertices - obj_mesh.bounding_box.centroid
-# distances = np.linalg.norm(vertices, axis=1)
-# vertices /= np.max(distances)
-#
-# mesh_unit_sphere = trimesh.Trimesh(vertices=vertices, faces=obj_mesh.faces)
-# norm_factor = np.max(distances)
-#
-# scene = trimesh.Scene()
-# scene.add_geometry([mesh_unit_sphere])
-# scene.show()
-#
-# surface_point_cloud = get_surface_point_cloud(mesh_unit_sphere, bounding_radius=1, scan_count=SCAN_COUNT, scan_resolution=SCAN_RESOLUTION)
-#
-# sdf_points, sdf_values = surface_point_cloud.sample_sdf_near_surface(use_scans=True, sign_method='depth', number_of_points=200000)
-# # occ_pts_ = sdf_points[np.where(np.abs(sdf_values) < hbs)[0]]
-# occ_pts_ = sdf_points[np.where(sdf_values < -hbs)[0]]
-
-# new_pts = get_raster_points(128)
-# occ = inside_mesh.check_mesh_contains(obj_mesh, new_pts)
-# occ_pts_ = new_pts[np.where(occ)[0]]
-# occ_not_pts_ = new_pts[np.where(np.logical_not(occ))[0]]
-#
+occ_in_idx = np.where(occ == 1)[0]
+occ_out_idx = np.where(occ == 0)[0]
+pcd_label = pts[occ_in_idx]
 
 data = np.load(pcd_name, allow_pickle=True)
 idxs = list(range(posecam.shape[0]))
@@ -105,9 +64,6 @@ for i in idxs:
 
     poses.append(pos)
     quats.append(quat)
-
-shapenet_id = str(data['shapenet_id'].item())
-category_id = str(data['shapenet_category_id'].item())
 
 depths = []
 segs = []
@@ -177,13 +133,13 @@ for i, dp_np in enumerate(dp_nps):
 
 point_cloud = torch.cat(points_world, dim=0)
 
-# coord = occ_pts_label
-coord = occ_not_pts
+# coord = pcd_mesh
+coord = pcd_label
 # coord = occ_pts_
 transform = transforms[0]
 offset = np.random.uniform(-hbs, hbs, coord.shape)
 coord = coord + offset
-# coord = coord * norm_factor
+coord = coord * norm_factor
 coord = coord * data['mesh_scale']
 
 coord = torch.from_numpy(coord)
@@ -201,17 +157,9 @@ coord = coord.cpu().numpy()
 
 ps.init()
 ps.set_up_dir("z_up")
-# sample_points = ps.register_point_cloud("samples", coords[:, :3] * norm_factor)
-# sample_points.add_scalar_quantity("rand vals with range", coords[:, -1], cmap='coolwarm', enabled=True)
-# ps.register_point_cloud("occ_pts", occ_pts, radius=0.005, color=[1, 0, 1], enabled=True)
-# ps.register_point_cloud("occ_not_pts", occ_not_pts, radius=0.005, color=[1, 0, 1], enabled=True)
-# ps.register_point_cloud("pcd", pcd, radius=0.005, color=[1, 0, 1], enabled=True)
-# ps.register_point_cloud("occ_in_sdf", occ_in * norm_factor_data, radius=0.005, color=[1, 0, 0], enabled=True)
-# ps.register_point_cloud("occ", occ_pts_ * norm_factor, radius=0.005, color=[0, 1, 0], enabled=True)
-# ps.register_point_cloud("occ_label", occ_pts_ * norm_factor, radius=0.005, color=[0, 0, 1], enabled=True)
+
 ps.register_point_cloud("coord", coord, radius=0.005, color=[0, 0, 1], enabled=True)
 ps.register_point_cloud("pcd", pcd, radius=0.005, color=[1, 1, 1], enabled=True)
-# ps.register_point_cloud("occ_not", occ_not_pts_, radius=0.005, color=[1, 1, 1], enabled=True)
 
 ps.show()
 
