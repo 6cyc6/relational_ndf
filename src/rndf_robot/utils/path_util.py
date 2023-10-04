@@ -1,6 +1,10 @@
 import os, os.path as osp
 
 
+def get_data_src():
+    return os.environ['LABEL_DIR']
+
+
 def get_rndf_src():
     return os.environ['RNDF_SOURCE_DIR']
 
